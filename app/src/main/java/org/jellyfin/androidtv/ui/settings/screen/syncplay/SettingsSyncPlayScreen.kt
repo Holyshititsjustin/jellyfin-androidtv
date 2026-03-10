@@ -2,24 +2,41 @@ package org.jellyfin.androidtv.ui.settings.screen.syncplay
 
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.auth.repository.UserRepository
 import org.jellyfin.androidtv.syncplay.SyncPlayViewModel
 import org.jellyfin.androidtv.ui.base.Icon
 import org.jellyfin.androidtv.ui.base.Text
 import org.jellyfin.androidtv.ui.base.list.ListButton
 import org.jellyfin.androidtv.ui.base.list.ListSection
 import org.jellyfin.androidtv.ui.settings.composable.SettingsColumn
+import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
 
 @Composable
 fun SettingsSyncPlayScreen() {
 	val viewModel = koinViewModel<SyncPlayViewModel>()
+	val userRepository = koinInject<UserRepository>()
 	val state by viewModel.state.collectAsState()
 	val defaultGroupName = stringResource(R.string.syncplay_default_group_name)
+	val createGroupName = userRepository.currentUser.value?.name
+		?.takeUnless { it.isBlank() }
+		?: defaultGroupName
+
+	LaunchedEffect(Unit) {
+		viewModel.refreshGroups()
+		while (isActive) {
+			delay(10_000)
+			viewModel.refreshGroups()
+		}
+	}
 
 	SettingsColumn {
 		item {
@@ -42,7 +59,7 @@ fun SettingsSyncPlayScreen() {
 			ListButton(
 				leadingContent = { Icon(painterResource(R.drawable.ic_add), contentDescription = null) },
 				headingContent = { Text(stringResource(R.string.syncplay_create_group)) },
-				onClick = { viewModel.createGroup(defaultGroupName) },
+				onClick = { viewModel.createGroup(createGroupName) },
 			)
 		}
 
@@ -84,7 +101,6 @@ fun SettingsSyncPlayScreen() {
 				ListButton(
 					leadingContent = { Icon(painterResource(R.drawable.ic_users), contentDescription = null) },
 					headingContent = { Text(group.groupName) },
-					captionContent = { Text(group.groupId.toString()) },
 					onClick = { viewModel.joinGroup(group.groupId) },
 				)
 			}
