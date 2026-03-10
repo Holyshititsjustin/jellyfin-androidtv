@@ -633,4 +633,8 @@
     <string name="syncplay_default_group_name">Android TV SyncPlay</string>
     <string name="syncplay_toast_group_joined">Joined SyncPlay group: %1$s</string>
     <string name="syncplay_toast_group_left">Left SyncPlay group</string>
+    <string name="syncplay_toast_user_joined">%1$s joined the SyncPlay group</string>
+    <string name="syncplay_toast_user_left">%1$s left the SyncPlay group</string>
+    <string name="syncplay_toast_user_joined_generic">A user joined the SyncPlay group</string>
+    <string name="syncplay_toast_user_left_generic">A user left the SyncPlay group</string>
 </resources>

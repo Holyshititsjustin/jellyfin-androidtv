@@ -416,6 +416,8 @@ class SyncPlayRepositoryImpl(
 			}
 		}
 
+		showParticipantMembershipToast(update)
+
 		if (update.type == GroupUpdateType.GROUP_JOINED || update.type == GroupUpdateType.GROUP_LEFT) {
 			refreshGroups()
 		}
@@ -463,6 +465,63 @@ class SyncPlayRepositoryImpl(
 		mainHandler.post {
 			Toast.makeText(appContext, message, Toast.LENGTH_SHORT).show()
 		}
+	}
+
+	private fun showParticipantMembershipToast(update: GroupUpdate) {
+		val typeName = update.type.name
+		if (typeName == GroupUpdateType.GROUP_JOINED.name || typeName == GroupUpdateType.GROUP_LEFT.name) return
+
+		val joined = typeName.contains("JOINED")
+		val left = typeName.contains("LEFT")
+		if (!joined && !left) return
+
+		val userName = extractUserName(update)
+		when {
+			joined && !userName.isNullOrBlank() -> showToast(appContext.getString(R.string.syncplay_toast_user_joined, userName))
+			joined -> showToast(appContext.getString(R.string.syncplay_toast_user_joined_generic))
+			left && !userName.isNullOrBlank() -> showToast(appContext.getString(R.string.syncplay_toast_user_left, userName))
+			left -> showToast(appContext.getString(R.string.syncplay_toast_user_left_generic))
+		}
+	}
+
+	private fun extractUserName(update: GroupUpdate): String? {
+		val targets = mutableListOf<Any>(update)
+		val nestedData = runCatching {
+			val method = update.javaClass.methods.firstOrNull { it.name == "getData" && it.parameterCount == 0 }
+			method?.invoke(update)
+		}.getOrNull()
+		if (nestedData != null) targets += nestedData
+
+		for (target in targets) {
+			val found = extractUserNameFromObject(target)
+			if (!found.isNullOrBlank()) return found
+		}
+
+		return null
+	}
+
+	private fun extractUserNameFromObject(target: Any): String? {
+
+		val directMethods = listOf("getUserName", "getUsername", "getName", "getParticipantName")
+		for (methodName in directMethods) {
+			val value = runCatching {
+				val method = target.javaClass.methods.firstOrNull { it.name == methodName && it.parameterCount == 0 }
+				method?.invoke(target) as? String
+			}.getOrNull()
+			if (!value.isNullOrBlank()) return value
+		}
+
+		val fieldNames = listOf("userName", "username", "name", "participantName")
+		for (fieldName in fieldNames) {
+			val value = runCatching {
+				val field = target.javaClass.declaredFields.firstOrNull { it.name == fieldName } ?: return@runCatching null
+				field.isAccessible = true
+				field.get(target) as? String
+			}.getOrNull()
+			if (!value.isNullOrBlank()) return value
+		}
+
+		return null
 	}
 
 	private fun bucketTicks(positionTicks: Long): Long {
