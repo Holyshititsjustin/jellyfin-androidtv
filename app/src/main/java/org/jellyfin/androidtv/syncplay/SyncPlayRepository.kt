@@ -1,7 +1,12 @@
 package org.jellyfin.androidtv.syncplay
 
+import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import android.widget.Toast
 import java.time.LocalDateTime
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -9,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.jellyfin.androidtv.R
 import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.extensions.syncPlayApi
 import org.jellyfin.sdk.model.UUID
@@ -52,6 +58,7 @@ interface SyncPlayRepository {
 	fun sendSeek(positionTicks: Long)
 	fun sendStop()
 	fun sendReady(playlistItemId: UUID, positionTicks: Long, isPlaying: Boolean)
+	fun isInLocalSeekRecoveryWindow(windowMs: Long = 3500L): Boolean
 	fun markRemotePlaybackTransition(windowMs: Long = 3000L)
 
 	fun handleGroupUpdate(update: GroupUpdate)
@@ -61,12 +68,16 @@ interface SyncPlayRepository {
 
 class SyncPlayRepositoryImpl(
 	private val api: ApiClient,
+	context: Context,
 ) : SyncPlayRepository {
 	companion object {
 		private const val LOG_TAG = "SyncPlayRepo"
+		private const val SWITCH_HANDOFF_BARRIER_MS = 900L
 	}
 
 	private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+	private val appContext = context.applicationContext
+	private val mainHandler = Handler(Looper.getMainLooper())
 	private val suppressLocalCommands = AtomicBoolean(false)
 	private val _state = MutableStateFlow(SyncPlayState())
 	override val state: StateFlow<SyncPlayState> = _state
@@ -81,9 +92,13 @@ class SyncPlayRepositoryImpl(
 	@Volatile
 	private var lastSetPlaylistItemId: UUID? = null
 	@Volatile
+	private var lastLocalSeekAtMs: Long = 0L
+	@Volatile
 	private var lastLocalPublishKey: LocalPublishKey? = null
 	@Volatile
 	private var lastLocalPublishAtMs: Long = 0L
+	@Volatile
+	private var lastPlaylistSwitchAtMs: Long = 0L
 
 	override fun refreshGroups() {
 		Timber.d("%s refreshGroups requested", LOG_TAG)
@@ -249,6 +264,16 @@ class SyncPlayRepositoryImpl(
 		}
 		Timber.d("%s sendUnpause requested: positionTicks=%s", LOG_TAG, positionTicks)
 		scope.launch {
+			val elapsedSinceSwitchMs = System.currentTimeMillis() - lastPlaylistSwitchAtMs
+			val remainingBarrierMs = SWITCH_HANDOFF_BARRIER_MS - elapsedSinceSwitchMs
+			if (remainingBarrierMs > 0L) {
+				Timber.d(
+					"%s sendUnpause delayed for handoff barrier: remainingMs=%s",
+					LOG_TAG,
+					remainingBarrierMs,
+				)
+				delay(remainingBarrierMs)
+			}
 			runCatching { api.syncPlayApi.syncPlayUnpause() }
 				.onFailure { Timber.w(it, "%s sendUnpause failed", LOG_TAG) }
 		}
@@ -259,12 +284,19 @@ class SyncPlayRepositoryImpl(
 			Timber.d("%s sendSeek skipped: local commands suppressed or no active group", LOG_TAG)
 			return
 		}
+		lastLocalSeekAtMs = System.currentTimeMillis()
 		Timber.d("%s sendSeek requested: positionTicks=%s", LOG_TAG, positionTicks)
 		scope.launch {
 			runCatching {
 				api.syncPlayApi.syncPlaySeek(SeekRequestDto(positionTicks = positionTicks))
 			}.onFailure { Timber.w(it, "%s sendSeek failed", LOG_TAG) }
 		}
+	}
+
+	override fun isInLocalSeekRecoveryWindow(windowMs: Long): Boolean {
+		val seekAtMs = lastLocalSeekAtMs
+		if (seekAtMs <= 0L) return false
+		return (System.currentTimeMillis() - seekAtMs) <= windowMs.coerceAtLeast(0L)
 	}
 
 	override fun sendStop() {
@@ -309,10 +341,24 @@ class SyncPlayRepositoryImpl(
 		)
 		scope.launch {
 			runCatching {
+				var switchedPlaylistItem = false
 				if (lastSetPlaylistItemId != playlistItemId) {
 					api.syncPlayApi.syncPlaySetPlaylistItem(SetPlaylistItemRequestDto(playlistItemId))
 					lastSetPlaylistItemId = playlistItemId
+					lastPlaylistSwitchAtMs = System.currentTimeMillis()
+					switchedPlaylistItem = true
 				}
+
+				if (switchedPlaylistItem) {
+					Timber.d(
+						"%s sendReady delayed for handoff barrier: playlistItemId=%s delayMs=%s",
+						LOG_TAG,
+						playlistItemId,
+						SWITCH_HANDOFF_BARRIER_MS,
+					)
+					delay(SWITCH_HANDOFF_BARRIER_MS)
+				}
+
 				api.syncPlayApi.syncPlayReady(
 					ReadyRequestDto(
 						`when` = LocalDateTime.now(),
@@ -341,9 +387,11 @@ class SyncPlayRepositoryImpl(
 		when (update) {
 			is SyncPlayGroupJoinedUpdate -> {
 				_state.update { it.copy(activeGroup = update.data, lastError = null) }
+				showToast(appContext.getString(R.string.syncplay_toast_group_joined, update.data.groupName))
 			}
 			is SyncPlayGroupLeftUpdate -> {
 				_state.update { it.copy(activeGroup = null, queueUpdate = null, stateUpdate = null, lastError = null) }
+				showToast(appContext.getString(R.string.syncplay_toast_group_left))
 			}
 			is SyncPlayPlayQueueUpdate -> {
 				_state.update { it.copy(queueUpdate = update.data, lastError = null) }
@@ -409,6 +457,12 @@ class SyncPlayRepositoryImpl(
 
 	private fun updateLastError(message: String) {
 		_state.update { it.copy(lastError = message) }
+	}
+
+	private fun showToast(message: String) {
+		mainHandler.post {
+			Toast.makeText(appContext, message, Toast.LENGTH_SHORT).show()
+		}
 	}
 
 	private fun bucketTicks(positionTicks: Long): Long {
