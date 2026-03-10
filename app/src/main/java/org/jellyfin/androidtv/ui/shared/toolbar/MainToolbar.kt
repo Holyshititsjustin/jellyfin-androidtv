@@ -7,11 +7,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
@@ -41,6 +37,7 @@ import org.jellyfin.androidtv.ui.base.button.IconButtonDefaults
 import org.jellyfin.androidtv.ui.navigation.ActivityDestinations
 import org.jellyfin.androidtv.ui.navigation.Destinations
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
+import org.jellyfin.androidtv.ui.settings.Routes
 import org.jellyfin.androidtv.ui.playback.MediaManager
 import org.jellyfin.androidtv.ui.settings.compat.SettingsViewModel
 import org.jellyfin.androidtv.util.apiclient.getUrl
@@ -160,37 +157,18 @@ private fun MainToolbar(
 		},
 		end = {
 			ToolbarButtons {
-				var syncPlayMenuExpanded by remember { mutableStateOf(false) }
 				IconButton(
-					onClick = { syncPlayMenuExpanded = true },
-					contentPadding = IconButtonDefaults.ContentPadding,
+					onClick = { settingsViewModel.show(Routes.SYNCPLAY) },
 				) {
 					Icon(
 						imageVector = ImageVector.vectorResource(R.drawable.ic_users),
-						contentDescription = "SyncPlay",
+						contentDescription = stringResource(R.string.syncplay_title),
+						tint = JellyfinTheme.colorScheme.badge,
 					)
 				}
-				DropdownMenu(
-					expanded = syncPlayMenuExpanded,
-					onDismissRequest = { syncPlayMenuExpanded = false }
-				) {
-					DropdownMenuItem(
-						text = { Text("Join SyncPlay Group") },
-						onClick = {
-							syncPlayMenuExpanded = false
-							// TODO: Implement navigation to SyncPlay join screen
-						}
-					)
-					DropdownMenuItem(
-						text = { Text("Create SyncPlay Group") },
-						onClick = {
-							syncPlayMenuExpanded = false
-							// TODO: Implement navigation to SyncPlay create screen
-						}
-					)
-				}
+
 				IconButton(
-					onClick = { settingsViewModel.show() },
+					onClick = { settingsViewModel.show(Routes.MAIN) },
 				) {
 					Icon(
 						imageVector = ImageVector.vectorResource(R.drawable.ic_settings),
